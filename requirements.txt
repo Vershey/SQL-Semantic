@@ -1,0 +1,8 @@
+fastapi>=0.110
+uvicorn>=0.29
+
+# dev / testing
+pytest>=8.0
+
+# optional: real model adapter, used when USE_REAL_ANTHROPIC=1
+# anthropic>=0.39
