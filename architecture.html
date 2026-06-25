@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Router SQL-RAG — Architecture</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e2e8f0; padding: 40px 20px; }
+  h1 { text-align: center; font-size: 1.6rem; margin-bottom: 6px; color: #f8fafc; }
+  .subtitle { text-align: center; color: #94a3b8; font-size: 0.9rem; margin-bottom: 40px; }
+
+  /* ── flow diagram ── */
+  .flow { display: flex; align-items: center; justify-content: center; gap: 0; flex-wrap: wrap; margin-bottom: 48px; }
+  .node {
+    background: #1e293b; border: 2px solid #334155; border-radius: 12px;
+    padding: 14px 20px; text-align: center; min-width: 110px;
+  }
+  .node .label { font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 4px; }
+  .node .name  { font-size: 1rem; font-weight: 600; color: #f1f5f9; }
+  .node.accent { background: #1e3a5f; border-color: #3b82f6; }
+  .node.accent .name { color: #93c5fd; }
+  .node.green  { background: #14352a; border-color: #22c55e; }
+  .node.green .name  { color: #86efac; }
+  .node.purple { background: #2d1b4e; border-color: #a855f7; }
+  .node.purple .name { color: #d8b4fe; }
+  .node.gold   { background: #3b2a0a; border-color: #f59e0b; }
+  .node.gold .name   { color: #fcd34d; }
+  .node.red    { background: #3b1111; border-color: #ef4444; }
+  .node.red .name    { color: #fca5a5; }
+
+  .arrow { font-size: 1.6rem; color: #475569; padding: 0 6px; }
+
+  /* fork / merge */
+  .fork-wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .fork-branch { display: flex; align-items: center; gap: 0; }
+  .fork-label  { font-size: 0.7rem; color: #64748b; margin-right: 6px; white-space: nowrap; }
+
+  /* ── layers table ── */
+  .layers { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 48px; }
+  .layer-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 16px; }
+  .layer-card h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: .07em; color: #64748b; margin-bottom: 10px; }
+  .layer-card ul { list-style: none; }
+  .layer-card ul li { font-size: 0.82rem; color: #cbd5e1; padding: 3px 0; border-bottom: 1px solid #1e293b; }
+  .layer-card ul li span { color: #64748b; }
+
+  /* ── security callout ── */
+  .callout { background: #1c1008; border: 1px solid #92400e; border-radius: 12px; padding: 16px 20px; margin-bottom: 48px; }
+  .callout h3 { color: #fbbf24; font-size: 0.85rem; margin-bottom: 8px; }
+  .callout ul { list-style: disc; padding-left: 18px; }
+  .callout ul li { font-size: 0.82rem; color: #d97706; margin-bottom: 4px; }
+
+  /* ── execute flow ── */
+  .steps { display: flex; flex-direction: column; gap: 12px; margin-bottom: 48px; }
+  .step { display: flex; align-items: flex-start; gap: 14px; background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 14px 18px; }
+  .step-num { background: #3b82f6; color: #fff; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.85rem; flex-shrink: 0; }
+  .step-body h4 { font-size: 0.9rem; color: #f1f5f9; margin-bottom: 3px; }
+  .step-body p  { font-size: 0.8rem; color: #94a3b8; }
+  code { background: #0f172a; border: 1px solid #334155; border-radius: 4px; padding: 1px 5px; font-size: 0.78rem; color: #7dd3fc; }
+
+  section h2 { font-size: 1rem; color: #94a3b8; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 16px; border-bottom: 1px solid #1e293b; padding-bottom: 6px; }
+</style>
+</head>
+<body>
+
+<h1>Router + Text-to-SQL + Semantic Retrieval</h1>
+<p class="subtitle">Natural-language questions routed to the right data source, evidence gathered, answer synthesized.</p>
+
+<!-- ══ TOP-LEVEL FLOW ══ -->
+<section>
+  <h2>Query Flow</h2>
+  <div class="flow">
+    <div class="node accent"><div class="label">Input</div><div class="name">Query</div></div>
+    <div class="arrow">→</div>
+
+    <div class="node purple"><div class="label">Dispatcher</div><div class="name">Router</div></div>
+    <div class="arrow">→</div>
+
+    <div class="fork-wrap">
+      <div class="fork-branch">
+        <span class="fork-label">SQL route</span>
+        <div class="node green"><div class="label">Strategy</div><div class="name">Text-to-SQL</div></div>
+      </div>
+      <div class="fork-branch">
+        <span class="fork-label">Semantic route</span>
+        <div class="node gold"><div class="label">Strategy</div><div class="name">Semantic</div></div>
+      </div>
+      <div class="fork-branch">
+        <span class="fork-label">Hybrid (both)</span>
+        <div class="node" style="border-color:#38bdf8"><div class="label">Parallel</div><div class="name">SQL + Semantic</div></div>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+
+    <div class="node" style="border-color:#e2e8f0"><div class="label">Normalized</div><div class="name">Evidence</div></div>
+    <div class="arrow">→</div>
+
+    <div class="node purple"><div class="label">LLM</div><div class="name">Synthesizer</div></div>
+    <div class="arrow">→</div>
+
+    <div class="node green"><div class="label">Output</div><div class="name">Answer + Citations</div></div>
+  </div>
+</section>
+
+<!-- ══ EXECUTE STEPS ══ -->
+<section>
+  <h2>AnswerQuestionUseCase.execute() — step by step</h2>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h4>Route the query</h4>
+        <p><code>router.route(query)</code> → <code>RouteDecision</code> with one or more of: <code>sql</code>, <code>semantic</code>, <code>clarify</code>.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h4>Clarification short-circuit</h4>
+        <p>If the router returns <code>CLARIFY</code>, return immediately — no retrieval needed.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <h4>Gather evidence in parallel</h4>
+        <p><code>asyncio.gather()</code> fans out to every matched strategy concurrently. SQL and semantic results arrive at the same time for hybrid queries.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <h4>Merge evidence</h4>
+        <p><code>Evidence.merge(results)</code> combines rows and passages into one normalized object regardless of source.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">5</div>
+      <div class="step-body">
+        <h4>Synthesize the answer</h4>
+        <p><code>synthesizer.synthesize(query, evidence, decision)</code> → <code>Answer</code> with prose + deterministic citations from provenance.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ LAYERS ══ -->
+<section>
+  <h2>Hexagonal Layers</h2>
+  <div class="layers">
+    <div class="layer-card">
+      <h3>Domain (pure logic)</h3>
+      <ul>
+        <li>Query <span>· ConversationContext</span></li>
+        <li>Route <span>· RouteDecision</span></li>
+        <li>Evidence <span>· Passage · TabularResult</span></li>
+        <li>SqlStrategy <span>· SqlGuard · SchemaCatalog</span></li>
+        <li>SemanticStrategy</li>
+        <li>Synthesizer <span>· Answer · Citation</span></li>
+      </ul>
+    </div>
+    <div class="layer-card">
+      <h3>Ports (interfaces)</h3>
+      <ul>
+        <li>LanguageModel</li>
+        <li>Embedder</li>
+        <li>VectorStore</li>
+        <li>SqlExecutor</li>
+        <li>SchemaProvider</li>
+      </ul>
+    </div>
+    <div class="layer-card">
+      <h3>Infrastructure (adapters)</h3>
+      <ul>
+        <li>FakeLLM <span>/ AnthropicLLM</span></li>
+        <li>HashingEmbedder</li>
+        <li>InMemoryVectorStore</li>
+        <li>SqliteExecutor</li>
+        <li>SqliteSchemaProvider</li>
+        <li>LlmRouter</li>
+        <li>LlmSynthesizer</li>
+      </ul>
+    </div>
+    <div class="layer-card">
+      <h3>Application</h3>
+      <ul>
+        <li>AnswerQuestionUseCase</li>
+        <li>StrategyRegistry</li>
+        <li>Config <span>(env-driven)</span></li>
+      </ul>
+    </div>
+    <div class="layer-card">
+      <h3>Interface</h3>
+      <ul>
+        <li>FastAPI <code>POST /ask</code></li>
+        <li>CLI <code>python -m interface.cli.main</code></li>
+      </ul>
+    </div>
+    <div class="layer-card">
+      <h3>Bootstrap</h3>
+      <ul>
+        <li>container.py <span>(composition root)</span></li>
+        <li>seed.py <span>(demo data)</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ══ SECURITY ══ -->
+<section>
+  <h2>SqlGuard — Security Boundary</h2>
+  <div class="callout">
+    <h3>Not a prompt instruction — a hard code boundary</h3>
+    <ul>
+      <li>Single statement only — no semicolon-chaining</li>
+      <li>Read-only: blocks DELETE, UPDATE, DROP, INSERT, DDL</li>
+      <li>Table allowlist: unknown tables are rejected</li>
+      <li>Mandatory LIMIT injected on every SELECT</li>
+      <li>SQLite connection opened read-only as defense in depth</li>
+    </ul>
+  </div>
+</section>
+
+</body>
+</html>
