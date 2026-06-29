@@ -39,6 +39,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+import matplotlib
+matplotlib.use("Agg")  # headless — works without a display
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+from matplotlib.patches import FancyArrowPatch
+
 import numpy as np
 from rank_bm25 import BM25Okapi
 
@@ -364,6 +370,127 @@ def parse_json(s: str) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# Confidence visualiser — generates a PNG dashboard of the pipeline scores.
+# --------------------------------------------------------------------------- #
+DECISION_COLORS = {"COVERED": "#2ecc71", "PARTIAL": "#f39c12", "DENIED": "#e74c3c", "ABSTAIN": "#95a5a6"}
+
+
+def _gauge(ax, score: int, title: str, decision: str) -> None:
+    """Draw a half-circle speedometer gauge on *ax*."""
+    color = DECISION_COLORS.get(decision, "#3498db")
+    low_color = "#e74c3c"
+    mid_color = "#f39c12"
+    high_color = "#2ecc71"
+
+    # Background arc segments (LOW / MED / HIGH zones)
+    for (start, end, fc) in [(0, 40, low_color), (40, 70, mid_color), (70, 100, high_color)]:
+        theta1 = 180 - start * 1.8
+        theta2 = 180 - end * 1.8
+        wedge = mpatches.Wedge((0.5, 0.3), 0.38, theta2, theta1,
+                               width=0.14, facecolor=fc, alpha=0.25, transform=ax.transAxes)
+        ax.add_patch(wedge)
+
+    # Filled arc showing actual score
+    filled_wedge = mpatches.Wedge((0.5, 0.3), 0.38, 180 - score * 1.8, 180,
+                                  width=0.14, facecolor=color, alpha=0.85, transform=ax.transAxes)
+    ax.add_patch(filled_wedge)
+
+    # Needle
+    import math
+    angle_deg = 180 - score * 1.8
+    angle_rad = math.radians(angle_deg)
+    nx = 0.5 + 0.28 * math.cos(angle_rad)
+    ny = 0.3 + 0.28 * math.sin(angle_rad)
+    ax.annotate("", xy=(nx, ny), xytext=(0.5, 0.3),
+                xycoords="axes fraction", textcoords="axes fraction",
+                arrowprops=dict(arrowstyle="-|>", color="#2c3e50", lw=2))
+
+    # Centre dot
+    circle = plt.Circle((0.5, 0.3), 0.025, color="#2c3e50", transform=ax.transAxes, zorder=5)
+    ax.add_patch(circle)
+
+    # Score text
+    ax.text(0.5, 0.58, f"{score}/100", ha="center", va="center",
+            fontsize=22, fontweight="bold", color=color, transform=ax.transAxes)
+    label = "HIGH" if score >= 70 else ("MED" if score >= 40 else "LOW")
+    ax.text(0.5, 0.70, label, ha="center", va="center",
+            fontsize=13, color=color, fontweight="bold", transform=ax.transAxes)
+    ax.text(0.5, 0.82, title, ha="center", va="center",
+            fontsize=10, color="#555", transform=ax.transAxes)
+    ax.text(0.5, 0.10, decision, ha="center", va="center",
+            fontsize=11, fontweight="bold",
+            color="white", transform=ax.transAxes,
+            bbox=dict(boxstyle="round,pad=0.3", facecolor=color, edgecolor="none"))
+
+    # Zone labels
+    ax.text(0.09, 0.30, "LOW", ha="center", fontsize=7, color=low_color, transform=ax.transAxes)
+    ax.text(0.50, 0.72, "", ha="center", fontsize=7, transform=ax.transAxes)  # spacer
+    ax.text(0.91, 0.30, "HIGH", ha="center", fontsize=7, color=high_color, transform=ax.transAxes)
+    ax.axis("off")
+
+
+def _horizontal_bar(ax, score: int, title: str, decision: str) -> None:
+    """Draw a segmented horizontal bar showing score vs 100."""
+    color = DECISION_COLORS.get(decision, "#3498db")
+    ax.barh(0, 100, color="#ecf0f1", height=0.5)
+    ax.barh(0, score, color=color, height=0.5, alpha=0.85)
+    # Zone dividers
+    for x, lbl in [(40, "40"), (70, "70")]:
+        ax.axvline(x, color="#bdc3c7", lw=1, ls="--")
+        ax.text(x, 0.42, lbl, ha="center", va="bottom", fontsize=8, color="#7f8c8d")
+    ax.text(score, 0, f"  {score}", va="center", fontsize=11, fontweight="bold", color=color)
+    ax.set_xlim(0, 105)
+    ax.set_ylim(-0.5, 0.8)
+    ax.set_yticks([])
+    ax.set_xlabel("Confidence (0 = low  →  100 = high)", fontsize=9)
+    ax.set_title(f"{title}  [{decision}]", fontsize=10, fontweight="bold",
+                 color=DECISION_COLORS.get(decision, "#2c3e50"))
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+
+def render_confidence_chart(
+    draft_score: int,
+    draft_decision: str,
+    verify_score: int,
+    verify_decision: str,
+    output_path: str = "confidence_report.png",
+) -> str:
+    """Build a 2-panel confidence dashboard and save to *output_path*."""
+    fig = plt.figure(figsize=(12, 6))
+    fig.patch.set_facecolor("#f8f9fa")
+
+    # Title banner
+    fig.text(0.5, 0.96, "Claims Coverage Copilot — Confidence Dashboard",
+             ha="center", va="top", fontsize=15, fontweight="bold", color="#2c3e50")
+    fig.text(0.5, 0.91, "Scale: 0 = low confidence (unresolved cause / weak evidence)  "
+             "→  100 = high confidence (clear policy + confirmed cause)",
+             ha="center", va="top", fontsize=9, color="#7f8c8d")
+
+    # Top row: two gauges
+    ax1 = fig.add_axes([0.05, 0.38, 0.40, 0.48])
+    ax2 = fig.add_axes([0.55, 0.38, 0.40, 0.48])
+    _gauge(ax1, draft_score, "Draft Determination", draft_decision)
+    _gauge(ax2, verify_score, "Verified Decision", verify_decision)
+
+    # Bottom row: two horizontal bars
+    ax3 = fig.add_axes([0.08, 0.15, 0.37, 0.16])
+    ax4 = fig.add_axes([0.58, 0.15, 0.37, 0.16])
+    _horizontal_bar(ax3, draft_score, "Draft", draft_decision)
+    _horizontal_bar(ax4, verify_score, "Verified", verify_decision)
+
+    # Legend
+    legend_patches = [mpatches.Patch(color=c, label=d, alpha=0.85)
+                      for d, c in DECISION_COLORS.items()]
+    fig.legend(handles=legend_patches, loc="lower center", ncol=4,
+               fontsize=9, frameon=False, bbox_to_anchor=(0.5, 0.02))
+
+    plt.savefig(output_path, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.close(fig)
+    return output_path
+
+
+# --------------------------------------------------------------------------- #
 # The agentic pipeline.
 # --------------------------------------------------------------------------- #
 def run(claim: str, retriever: HybridRetriever, llm: LLM) -> dict:
@@ -445,6 +572,15 @@ def run(claim: str, retriever: HybridRetriever, llm: LLM) -> dict:
     print("   notes         :", verify["notes"])
     line("=")
     print("Human adjuster reviews this draft before any decision is communicated.")
+
+    chart_path = render_confidence_chart(
+        draft_score=draft.get("confidence", 0),
+        draft_decision=draft["decision"],
+        verify_score=verify.get("confidence", 0),
+        verify_decision=verify["final_decision"],
+    )
+    print(f"\nConfidence chart saved -> {chart_path}")
+
     return {"plan": plan, "evidence": [d["id"] for d in evidence],
             "realtime": realtime, "draft": draft, "verify": verify}
 
