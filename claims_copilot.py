@@ -254,9 +254,13 @@ coverage determination for a human adjuster to review. Use ONLY the supplied
 evidence and tool results. Every point in the rationale must trace to a cited
 doc_id. If the cause of loss is not established by the evidence, say so and
 prefer PARTIAL or flag it as an open question rather than guessing.
+Also assign a confidence score (0-100) reflecting how certain the decision is:
+  100 = cause of loss unambiguous, policy language clear, no open questions
+    0 = cause entirely unknown, conflicting exclusions, evidence absent
 Respond with ONLY JSON in this schema:
 {
   "decision": "COVERED | PARTIAL | DENIED",
+  "confidence": <integer 0-100>,
   "rationale": "2-4 sentences, each grounded in a cited doc_id",
   "citations": [{"doc_id": "ID", "point": "what this doc establishes"}],
   "open_questions": ["facts an adjuster must still confirm"]
@@ -266,11 +270,15 @@ VERIFIER_SYSTEM = """You are a faithfulness verifier. Check the draft determinat
 against the evidence. Confirm every cited point is actually supported by the
 referenced doc. If any material point is unsupported, set all_supported=false and
 set final_decision to "ABSTAIN" (escalate to a human).
+Also assign a confidence score (0-100) for the final decision:
+  100 = every citation verified, cause clear, no open questions
+    0 = citations unsupported or cause entirely unresolved
 Respond with ONLY JSON:
 {
   "all_supported": true,
   "unsupported_points": [],
   "final_decision": "COVERED | PARTIAL | DENIED | ABSTAIN",
+  "confidence": <integer 0-100>,
   "notes": "one or two sentences"
 }"""
 
@@ -295,6 +303,7 @@ _MOCKS = {
     }),
     "draft": json.dumps({
         "decision": "PARTIAL",
+        "confidence": 42,
         "rationale": (
             "The base policy covers sudden and accidental water discharge (POL-BASE), "
             "but endorsement HO-217 excludes loss from flood or surface water (END-HO217), "
@@ -318,6 +327,7 @@ _MOCKS = {
         "all_supported": True,
         "unsupported_points": [],
         "final_decision": "PARTIAL",
+        "confidence": 42,
         "notes": "All cited points trace to the referenced documents; cause of loss remains an open question for the adjuster.",
     }),
 }
@@ -410,10 +420,17 @@ def run(claim: str, retriever: HybridRetriever, llm: LLM) -> dict:
         user=(f"<draft>\n{json.dumps(draft)}\n</draft>\n<evidence>\n{ev_block}\n</evidence>"),
     ))
 
+    def _conf_bar(score: int, width: int = 20) -> str:
+        filled = round(score / 100 * width)
+        bar = "#" * filled + "-" * (width - filled)
+        label = "HIGH" if score >= 70 else ("MED" if score >= 40 else "LOW")
+        return f"[{bar}] {score}/100 ({label})"
+
     # ---- report ----
     print("\n5) DRAFT DETERMINATION"); line()
-    print("   decision :", draft["decision"])
-    print("   rationale:", draft["rationale"])
+    print("   decision   :", draft["decision"])
+    print("   confidence :", _conf_bar(draft.get("confidence", 0)))
+    print("   rationale  :", draft["rationale"])
     print("   citations:")
     for c in draft["citations"]:
         print(f"       - [{c['doc_id']}] {c['point']}")
@@ -424,6 +441,7 @@ def run(claim: str, retriever: HybridRetriever, llm: LLM) -> dict:
     print("\n6) VERIFIER (faithfulness gate)"); line()
     print("   all_supported :", verify["all_supported"])
     print("   FINAL DECISION:", verify["final_decision"])
+    print("   confidence    :", _conf_bar(verify.get("confidence", 0)))
     print("   notes         :", verify["notes"])
     line("=")
     print("Human adjuster reviews this draft before any decision is communicated.")
